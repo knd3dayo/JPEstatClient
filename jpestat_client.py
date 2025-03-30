@@ -1,6 +1,8 @@
+import os
+
 import requests # type: ignore[import]
-import json
 import pandas as pd # type: ignore[import]
+from dotenv import load_dotenv
 
 '''
 日本の政府統計APIを利用するためのクライアントクラス
@@ -14,11 +16,12 @@ class JPEStatData:
     """
     日本の政府統計APIのデータクラス
     """
-    def __init__(self, stat_data: dict ={}):
+    def __init__(self, stats_data_id, stat_data: dict ={}):
+        self.stats_data_id = stats_data_id
         self.stat_data = stat_data
 
     # 統計データからDataFrameを返す
-    def get_df(self) -> pd.DataFrame:
+    def get_table_info_df(self) -> pd.DataFrame:
         """
         3.4. 統計データ取得
         """
@@ -27,7 +30,7 @@ class JPEStatData:
         return df
     
     # 統計データのdictからCLASS_INFを取得してDataFrameを返す
-    def __get_stat_data_class_df(self) -> pd.DataFrame:
+    def get_class_info_df(self) -> pd.DataFrame:
         """
         統計データからCLASS_OBJを取得
         """
@@ -36,18 +39,34 @@ class JPEStatData:
         return df
     
     # 統計データのdictからVLALUEを取得してDataFrameを返す
-    def __get_stat_data_value_df(self) -> pd.DataFrame:
+    def get_value_df(self) -> pd.DataFrame:
         """
         統計データからVALUEを取得
         """
         # DataFrameに変換
         df = pd.json_normalize(self.stat_data.get("GET_STATS_DATA",{}).get("STATISTICAL_DATA",{}).get("DATA_INF",{}).get("VALUE",[]))   
+        # statsDataIdを1列目の全テータに追加
+        df.insert(0, "statsDataId", self.stats_data_id)
+
+
         return df
     
-    # 統計データのdictからCLASS_INFを取得してDataFrameを返す
+    # 統計データのdictからCLASS_OBJの@id列の値を指定してCLASSデータを取得する
+    def get_column_info_df(self, column_id: str) -> pd.DataFrame:
+        """
+        統計データからCLASS_OBJを取得
+        column_id: CLASS_OBJの@id列の値
+        """
+        class_data_list = self.stat_data.get("GET_STATS_DATA",{}).get("STATISTICAL_DATA",{}).get("CLASS_INF",{}).get("CLASS_OBJ",[])
+        target_class_data = [class_data for class_data in class_data_list if class_data.get("@id") == column_id]
+        if len(target_class_data) == 0:
+            return pd.DataFrame()
+        # DataFrameに変換
+        df = pd.json_normalize(target_class_data[0].get("CLASS",[]))
+        return df
 
     # 統計データのdictからCLASS_OBJとVALUEを取得して結合したDataFrameを返す
-    def get_values_df(self, params: dict ={}) -> pd.DataFrame:
+    def get_column_modified_values_df(self, params: dict ={}) -> pd.DataFrame:
         """
         統計データからCLASS_OBJとVALUEを取得して結合
         「@ + CLASS_OBJの@id列の値」がVALUEの各列名に対応する
@@ -56,9 +75,9 @@ class JPEStatData:
         $は値に置き換える
         """
         # CLASS_OBJを取得
-        class_df = self.__get_stat_data_class_df()
+        class_df = self.get_class_info_df()
         # VALUEを取得
-        value_df = self.__get_stat_data_value_df()
+        value_df = self.get_value_df()
         # CLASS_OBJの@id列をVALUEの各列名に対応させる
         # class_dfの@idをキーに@nameへのマッピングを作成
         # value_dfの列名を置き換える
@@ -71,6 +90,52 @@ class JPEStatData:
         value_df.rename(columns=class_mapping, inplace=True)
         
         return value_df
+
+class JPEStatListData:
+    """
+    日本の政府統計APIの統計表情報クラス
+    """
+    def __init__(self, stat_list: dict ={}):
+        self.stat_list = stat_list
+
+    # 統計表情報からDataFrameを返す
+    def get_df(self) -> pd.DataFrame:
+        """
+        3.2. 統計表情報取得
+        """
+        # DataFrameに変換
+        df = pd.json_normalize(self.stat_list.get("GET_STATS_LIST",{}).get("DATALIST_INF",{}).get("TABLE_INF",[]))   
+        # 列一覧を表示
+        print(df.columns.tolist())
+        return df
+    
+    def get_basic_info_df(self) -> pd.DataFrame:
+        """
+        3.2. 統計表情報取得
+        """
+        
+        # DataFrameに変換
+        # print(json.dumps(self.stat_list, indent=2, ensure_ascii=False))
+        df = pd.json_normalize(self.stat_list.get("GET_STATS_LIST",{}).get("DATALIST_INF",{}).get("TABLE_INF",{}))   
+        # @id, STATISTICS_NAME, CYCLE, SURVEY_DATE, DESCRIPTIONを取得
+        df = df[[
+            "@id", "STATISTICS_NAME", "CYCLE", "SURVEY_DATE", "COLLECT_AREA", "DESCRIPTION", 
+            "TITLE_SPEC.TABLE_CATEGORY", "TITLE_SPEC.TABLE_NAME", "TITLE_SPEC.TABLE_EXPLANATION"]]
+
+        return df
+
+    def get_basic_info(self) -> list[tuple[str, str, str, str, str, str, str, str, str, str, str, str, str]]:
+        """
+        3.2. 統計表情報取得
+        """
+        df = self.get_df()
+        basic_info = df[["@id", "STATISTICS_NAME", "TITLE", "COLLECT_AREA", 
+                         "STATISTICS_NAME_SPEC.TABULATION_CATEGORY", "STATISTICS_NAME_SPEC.TABULATION_SUB_CATEGORY1", 
+                         "STATISTICS_NAME_SPEC.TABULATION_SUB_CATEGORY2", "STATISTICS_NAME_SPEC.TABULATION_SUB_CATEGORY3",
+                         "TITLE_SPEC.TABLE_CATEGORY", "TITLE_SPEC.TABLE_NAME", "TITLE_SPEC.TABLE_EXPLANATION",
+                         "SURVEY_DATE",  "DESCRIPTION"]].values.tolist()
+
+        return basic_info
 
 
 class JPEStatClient:
@@ -86,7 +151,8 @@ class JPEStatClient:
         self.app_id = app_id
         self.lang = lang
 
-    def get_stat_list(self, params: dict ={}) -> dict:
+    # 2 統計表情報取得
+    def get_stat_list_json(self, params: dict ={}) -> dict:
         """
         3.2. 統計表情報取得
         パラメータ名	意味	必須	設定内容・設定可能値
@@ -143,8 +209,18 @@ class JPEStatClient:
             return response.json()
         else:
             raise Exception(response.raise_for_status())
-        
-    def get_meta_info(self, params: dict ={}) -> dict:
+
+    # 統計表データを取得してJPEStatListDataクラスを返す
+    def get_stat_list_object(self, params: dict ={}) -> JPEStatListData:
+        """
+        3.2. 統計表情報取得
+        """
+        stat_list = self.get_stat_list_json(params=params)
+        # print(json.dumps(stat_list, indent=2, ensure_ascii=False))
+        # JPEStatListDataクラスに変換
+        return JPEStatListData(stat_list=stat_list)
+    # 3 メタ情報取得    
+    def get_meta_info_json(self, params: dict ={}) -> dict:
         """
         3.2. メタ情報取得
         パラメータ名	意味	必須	設定内容・設定可能値
@@ -168,69 +244,17 @@ class JPEStatClient:
         else:
             raise Exception(response.raise_for_status())
 
-
-    def get_catalog(self, params: dict ={}) -> dict:
+    # メタ情報を取得してDataFrameを返す
+    def get_meta_info_df(self, params: dict ={}) -> pd.DataFrame:
         """
-        3.7. データカタログ情報取得
-        パラメータ名	意味	必須	設定内容・設定可能値
-        surveyYears	調査年月	－	以下のいずれかの形式で指定して下さい。
-        ・yyyy：単年検索
-        ・yyyymm：単月検索
-        ・yyyymm-yyyymm：範囲検索
-        openYears	公開年月	－	調査年月と同様です。
-        statsField	統計分野	－	以下のいずれかの形式で指定して下さい。
-        ・数値2桁：統計大分類で検索
-        ・数値4桁：統計小分類で検索
-        statsCode	政府統計コード	－	以下のいずれかの形式で指定して下さい。
-        ・数値5桁：作成機関で検索
-        ・数値8桁：政府統計コードで検索
-        searchWord	検索キーワード	－	任意の文字列
-        表題やメタ情報等に含まれている文字列を検索します。
-        AND 、OR 又は NOT を指定して複数ワードでの検索が可能です。 (東京 AND 人口、東京 OR 大阪 等)
-        collectArea	集計地域区分	－	検索するデータの集計地域区分を指定して下さい。
-        ・1：全国
-        ・2：都道府県
-        ・3：市区町村
-        explanationGetFlg	解説情報有無	－	統計表及び、提供統計、提供分類の解説を取得するか否かを以下のいずれかから指定して下さい。
-        ・Y：取得する (省略値)
-        ・N：取得しない
-        dataType	検索データ形式	－	以下の値を指定して下さい。
-        ・XLS：EXCELファイル
-        ・CSV：CSVファイル
-        ・PDF：PDFファイル
-        ・XML：XMLファイル
-        ・XLS_REP：EXCELファイル（閲覧用）
-        ・DB：統計データベース
-        カンマ区切りで複数指定可能です。
-        省略時はすべてを指定した場合と同じです。
-        startPosition	データ取得開始位置	－	データの取得開始位置（1から始まる番号）を指定して下さい。省略時は先頭から取得します。
-        統計表情報を複数回に分けて取得する場合等、継続データを取得する開始位置（データセット）を指定するために指定します。
-        前回受信したデータの<NEXT_KEY>タグの値を指定します。
-        catalogId	カタログID	－	検索するカタログIDを指定してください。
-        resourceId	カタログリソースID	－	検索するカタログリソースIDを指定してください。
-        limit	データ取得件数	－	データの取得データセット数を指定して下さい。省略時は100データセットです。
-        データセット数が指定したlimit値より少ない場合、全件を取得します。データセット数が指定したlimit値より多い場合（継続データが存在する）は、受信したデータの<NEXT_KEY>タグに継続データの開始位置が設定されます。
-        updatedDate	更新日付	－	更新日付を指定します。指定された期間で更新されたデータセットの情報を提供します。以下のいずれかの形式で指定して下さい。
-        ・yyyy：単年検索
-        ・yyyymm：単月検索
-        ・yyyymmdd：単日検索
-        ・yyyymmdd-yyyymmdd：範囲検索
-        callback	コールバック関数	△	JSONP形式のデータ呼出の場合は必須パラメータです。
-        コールバックされる関数名を指定して下さい。
-        省略時は指定しません。
+        3.3. メタ情報取得
         """
-
-        url = "https://api.e-stat.go.jp/rest/3.0/app/json/getDataCatalog"
-        params["appId"] = self.app_id
-        params["lang"] = self.lang
-        
-        response = requests.get(url, params=params)
-        
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(response.raise_for_status())
-
+        meta_info = self.get_meta_info_json(params=params)
+        # DataFrameに変換
+        df = pd.json_normalize(meta_info.get("GET_META_INFO",{}).get("METADATA_INF",{}).get("TABLE_INF",[]))   
+        return df
+    
+    # 4 統計データ取得
     def get_stat_data_json(self, params: dict ={}) -> dict:
         """
         3.4. 統計データ取得
@@ -312,37 +336,80 @@ class JPEStatClient:
         """
         stat_data = self.get_stat_data_json(params=params)
         # JPEStatDataクラスに変換
-        return JPEStatData(stat_data=stat_data)
+        return JPEStatData(stats_data_id=params["statsDataId"], stat_data=stat_data)
     
-    # 統計表情報を取得してDataFrameを返す
-    def get_stat_list_df(self, params: dict ={}) -> pd.DataFrame:
+    # 7. データカタログ情報取得
+    def get_catalog_json(self, params: dict ={}) -> dict:
         """
-        3.2. 統計表情報取得
+        3.7. データカタログ情報取得
+        パラメータ名	意味	必須	設定内容・設定可能値
+        surveyYears	調査年月	－	以下のいずれかの形式で指定して下さい。
+        ・yyyy：単年検索
+        ・yyyymm：単月検索
+        ・yyyymm-yyyymm：範囲検索
+        openYears	公開年月	－	調査年月と同様です。
+        statsField	統計分野	－	以下のいずれかの形式で指定して下さい。
+        ・数値2桁：統計大分類で検索
+        ・数値4桁：統計小分類で検索
+        statsCode	政府統計コード	－	以下のいずれかの形式で指定して下さい。
+        ・数値5桁：作成機関で検索
+        ・数値8桁：政府統計コードで検索
+        searchWord	検索キーワード	－	任意の文字列
+        表題やメタ情報等に含まれている文字列を検索します。
+        AND 、OR 又は NOT を指定して複数ワードでの検索が可能です。 (東京 AND 人口、東京 OR 大阪 等)
+        collectArea	集計地域区分	－	検索するデータの集計地域区分を指定して下さい。
+        ・1：全国
+        ・2：都道府県
+        ・3：市区町村
+        explanationGetFlg	解説情報有無	－	統計表及び、提供統計、提供分類の解説を取得するか否かを以下のいずれかから指定して下さい。
+        ・Y：取得する (省略値)
+        ・N：取得しない
+        dataType	検索データ形式	－	以下の値を指定して下さい。
+        ・XLS：EXCELファイル
+        ・CSV：CSVファイル
+        ・PDF：PDFファイル
+        ・XML：XMLファイル
+        ・XLS_REP：EXCELファイル（閲覧用）
+        ・DB：統計データベース
+        カンマ区切りで複数指定可能です。
+        省略時はすべてを指定した場合と同じです。
+        startPosition	データ取得開始位置	－	データの取得開始位置（1から始まる番号）を指定して下さい。省略時は先頭から取得します。
+        統計表情報を複数回に分けて取得する場合等、継続データを取得する開始位置（データセット）を指定するために指定します。
+        前回受信したデータの<NEXT_KEY>タグの値を指定します。
+        catalogId	カタログID	－	検索するカタログIDを指定してください。
+        resourceId	カタログリソースID	－	検索するカタログリソースIDを指定してください。
+        limit	データ取得件数	－	データの取得データセット数を指定して下さい。省略時は100データセットです。
+        データセット数が指定したlimit値より少ない場合、全件を取得します。データセット数が指定したlimit値より多い場合（継続データが存在する）は、受信したデータの<NEXT_KEY>タグに継続データの開始位置が設定されます。
+        updatedDate	更新日付	－	更新日付を指定します。指定された期間で更新されたデータセットの情報を提供します。以下のいずれかの形式で指定して下さい。
+        ・yyyy：単年検索
+        ・yyyymm：単月検索
+        ・yyyymmdd：単日検索
+        ・yyyymmdd-yyyymmdd：範囲検索
+        callback	コールバック関数	△	JSONP形式のデータ呼出の場合は必須パラメータです。
+        コールバックされる関数名を指定して下さい。
+        省略時は指定しません。
         """
-        stat_list = self.get_stat_list(params=params)
-        # DataFrameに変換
-        df = pd.json_normalize(stat_list.get("GET_STATS_LIST",{}).get("DATALIST_INF",{}).get("TABLE_INF",[]))   
-        return df
-    # メタ情報を取得してDataFrameを返す
-    def get_meta_info_df(self, params: dict ={}) -> pd.DataFrame:
-        """
-        3.3. メタ情報取得
-        """
-        meta_info = self.get_meta_info(params=params)
-        # DataFrameに変換
-        df = pd.json_normalize(meta_info.get("GET_META_INFO",{}).get("METADATA_INF",{}).get("TABLE_INF",[]))   
-        return df
-    
+
+        url = "https://api.e-stat.go.jp/rest/3.0/app/json/getDataCatalog"
+        params["appId"] = self.app_id
+        params["lang"] = self.lang
+        
+        response = requests.get(url, params=params)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            raise Exception(response.raise_for_status())
+
     # DataCatalogを取得してDataFrameを返す
     def get_catalog_df(self, params: dict ={}) -> pd.DataFrame:
         """
         3.7. データカタログ情報取得
         """
-        catalog = self.get_catalog(params=params)
+        catalog = self.get_catalog_json(params=params)
         # DataFrameに変換
         df = pd.json_normalize(catalog.get("GET_DATA_CATALOG",{}).get("DATA_CATALOG_LIST_INF",{}).get("DATA_CATALOG_INF",[]))   
         return df
-
 
     
 def init_env():
@@ -354,21 +421,3 @@ def init_env():
         load_dotenv(dotenv_path)
 
 
-if __name__ == "__main__":
-    from dotenv import load_dotenv
-    import os
-
-    init_env()
-    app_id = os.getenv("JPESTAT_APP_ID", "")
-    if not app_id:
-        raise ValueError("JPESTAT_APP_ID is not set in the environment variables.")
-    client = JPEStatClient(app_id=app_id, lang="J")
-    params = {
-        "surveyYears": "2020",
-    }
-    # 統計表情報を取得
-    data_json =  client.get_stat_data_json(params={"statsDataId": "0004014855"})
-    print(json.dumps(data_json, indent=4, ensure_ascii=False))
-    data_object: JPEStatData = client.get_stat_data_object(params={"statsDataId": "0004014855"})
-    df = data_object.get_values_df()
-    print(df.head())
