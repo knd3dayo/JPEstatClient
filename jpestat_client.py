@@ -137,6 +137,21 @@ class JPEStatListData:
 
         return basic_info
 
+class JPEStatMetaData:
+    """
+    日本の政府統計APIのメタ情報クラス
+    """
+    def __init__(self, meta_data: dict ={}):
+        self.meta_data = meta_data
+
+    # メタ情報からDataFrameを返す
+    def get_df(self) -> pd.DataFrame:
+        """
+        3.2. メタ情報取得
+        """
+        # DataFrameに変換
+        df = pd.json_normalize(self.meta_data.get("GET_META_INFO",{}).get("METADATA_INF",{}).get("TABLE_INF",[]))   
+        return df
 
 class JPEStatClient:
     def __init__(self, app_id: str, lang: str = "J"):
@@ -245,14 +260,13 @@ class JPEStatClient:
             raise Exception(response.raise_for_status())
 
     # メタ情報を取得してDataFrameを返す
-    def get_meta_info_df(self, params: dict ={}) -> pd.DataFrame:
+    def get_meta_info_object(self, params: dict ={}) -> JPEStatMetaData:
         """
         3.3. メタ情報取得
         """
         meta_info = self.get_meta_info_json(params=params)
-        # DataFrameに変換
-        df = pd.json_normalize(meta_info.get("GET_META_INFO",{}).get("METADATA_INF",{}).get("TABLE_INF",[]))   
-        return df
+        # JPEStatMetaDataクラスに変換
+        return JPEStatMetaData(meta_data=meta_info)
     
     # 4 統計データ取得
     def get_stat_data_json(self, params: dict ={}) -> dict:
@@ -331,85 +345,13 @@ class JPEStatClient:
 
     # 統計データを取得してJPEStatDataクラスを返す
     def get_stat_data_object(self, params: dict ={}) -> JPEStatData:
+        
         """
         3.4. 統計データ取得
         """
         stat_data = self.get_stat_data_json(params=params)
         # JPEStatDataクラスに変換
         return JPEStatData(stats_data_id=params["statsDataId"], stat_data=stat_data)
-    
-    # 7. データカタログ情報取得
-    def get_catalog_json(self, params: dict ={}) -> dict:
-        """
-        3.7. データカタログ情報取得
-        パラメータ名	意味	必須	設定内容・設定可能値
-        surveyYears	調査年月	－	以下のいずれかの形式で指定して下さい。
-        ・yyyy：単年検索
-        ・yyyymm：単月検索
-        ・yyyymm-yyyymm：範囲検索
-        openYears	公開年月	－	調査年月と同様です。
-        statsField	統計分野	－	以下のいずれかの形式で指定して下さい。
-        ・数値2桁：統計大分類で検索
-        ・数値4桁：統計小分類で検索
-        statsCode	政府統計コード	－	以下のいずれかの形式で指定して下さい。
-        ・数値5桁：作成機関で検索
-        ・数値8桁：政府統計コードで検索
-        searchWord	検索キーワード	－	任意の文字列
-        表題やメタ情報等に含まれている文字列を検索します。
-        AND 、OR 又は NOT を指定して複数ワードでの検索が可能です。 (東京 AND 人口、東京 OR 大阪 等)
-        collectArea	集計地域区分	－	検索するデータの集計地域区分を指定して下さい。
-        ・1：全国
-        ・2：都道府県
-        ・3：市区町村
-        explanationGetFlg	解説情報有無	－	統計表及び、提供統計、提供分類の解説を取得するか否かを以下のいずれかから指定して下さい。
-        ・Y：取得する (省略値)
-        ・N：取得しない
-        dataType	検索データ形式	－	以下の値を指定して下さい。
-        ・XLS：EXCELファイル
-        ・CSV：CSVファイル
-        ・PDF：PDFファイル
-        ・XML：XMLファイル
-        ・XLS_REP：EXCELファイル（閲覧用）
-        ・DB：統計データベース
-        カンマ区切りで複数指定可能です。
-        省略時はすべてを指定した場合と同じです。
-        startPosition	データ取得開始位置	－	データの取得開始位置（1から始まる番号）を指定して下さい。省略時は先頭から取得します。
-        統計表情報を複数回に分けて取得する場合等、継続データを取得する開始位置（データセット）を指定するために指定します。
-        前回受信したデータの<NEXT_KEY>タグの値を指定します。
-        catalogId	カタログID	－	検索するカタログIDを指定してください。
-        resourceId	カタログリソースID	－	検索するカタログリソースIDを指定してください。
-        limit	データ取得件数	－	データの取得データセット数を指定して下さい。省略時は100データセットです。
-        データセット数が指定したlimit値より少ない場合、全件を取得します。データセット数が指定したlimit値より多い場合（継続データが存在する）は、受信したデータの<NEXT_KEY>タグに継続データの開始位置が設定されます。
-        updatedDate	更新日付	－	更新日付を指定します。指定された期間で更新されたデータセットの情報を提供します。以下のいずれかの形式で指定して下さい。
-        ・yyyy：単年検索
-        ・yyyymm：単月検索
-        ・yyyymmdd：単日検索
-        ・yyyymmdd-yyyymmdd：範囲検索
-        callback	コールバック関数	△	JSONP形式のデータ呼出の場合は必須パラメータです。
-        コールバックされる関数名を指定して下さい。
-        省略時は指定しません。
-        """
-
-        url = "https://api.e-stat.go.jp/rest/3.0/app/json/getDataCatalog"
-        params["appId"] = self.app_id
-        params["lang"] = self.lang
-        
-        response = requests.get(url, params=params)
-        
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(response.raise_for_status())
-
-    # DataCatalogを取得してDataFrameを返す
-    def get_catalog_df(self, params: dict ={}) -> pd.DataFrame:
-        """
-        3.7. データカタログ情報取得
-        """
-        catalog = self.get_catalog_json(params=params)
-        # DataFrameに変換
-        df = pd.json_normalize(catalog.get("GET_DATA_CATALOG",{}).get("DATA_CATALOG_LIST_INF",{}).get("DATA_CATALOG_INF",[]))   
-        return df
 
     
 def init_env():
